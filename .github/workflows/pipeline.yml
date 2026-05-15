@@ -1,0 +1,63 @@
+name: Sports Quant AI
+
+on:
+
+  schedule:
+    - cron: "*/10 * * * *"
+
+  workflow_dispatch:
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Requirements
+        run: |
+          pip install -r requirements.txt
+
+      - name: Create Folders
+        run: |
+          mkdir -p data/raw
+          mkdir -p data/processed
+          mkdir -p data/models
+
+      - name: Collect Odds
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          python src/collectors/odds_collector.py
+
+      - name: Collect ESPN
+        run: |
+          python src/collectors/espn_collector.py
+
+      - name: Feature Engineering
+        run: |
+          python src/features/team_features.py
+
+      - name: Train Model
+        run: |
+          python src/models/train.py
+
+      - name: Predict EV+
+        run: |
+          python src/models/predict.py
+
+      - name: Send Telegram Alerts
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python src/alerts/telegram.py
