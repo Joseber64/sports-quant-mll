@@ -1,9 +1,9 @@
-name: Sports Quant AI
+name: Quant Sports AI
 
 on:
 
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/15 * * * *"
 
   workflow_dispatch:
 
@@ -15,20 +15,16 @@ jobs:
 
     steps:
 
-      - name: Checkout Repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install Requirements
-        run: |
-          pip install -r requirements.txt
+      - run: pip install -r requirements.txt
 
-      - name: Create Folders
-        run: |
+      - run: |
+          mkdir -p database
           mkdir -p data/raw
           mkdir -p data/processed
           mkdir -p data/models
@@ -39,23 +35,31 @@ jobs:
         run: |
           python src/collectors/odds_collector.py
 
-      - name: Collect ESPN
+      - name: Collect Historical
         run: |
-          python src/collectors/espn_collector.py
+          python src/collectors/historical_results.py
 
-      - name: Feature Engineering
+      - name: ELO Ratings
         run: |
-          python src/features/team_features.py
+          python src/features/elo_rating.py
 
-      - name: Train Model
+      - name: Market Features
         run: |
-          python src/models/train.py
+          python src/features/market_features.py
+
+      - name: Train Ensemble
+        run: |
+          python src/models/train_ensemble.py
 
       - name: Predict EV+
         run: |
-          python src/models/predict.py
+          python src/models/predict_ev.py
 
-      - name: Send Telegram Alerts
+      - name: ROI Tracking
+        run: |
+          python src/tracking/roi_tracker.py
+
+      - name: Telegram Alerts
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
