@@ -7,16 +7,6 @@ import sys
 from datetime import datetime
 
 import config
-import odds_collector
-import espn_collector
-import historical_results
-import elo_rating
-import market_features
-import team_features
-import train_ensemble
-import predict_ev
-import telegram
-import roi_tracker
 
 # Configure main logger
 logging.basicConfig(
@@ -36,14 +26,13 @@ def run_data_collection():
     logger.info("="*50)
     
     try:
+        logger.info("Collecting ESPN data (live + historical)...")
+        # import espn_collector
+        # espn_collector.main()
+        
         logger.info("Collecting odds data...")
-        odds_collector.main()
-        
-        logger.info("Collecting ESPN data...")
-        espn_collector.main()
-        
-        logger.info("Collecting historical results...")
-        historical_results.main()
+        # import odds_collector
+        # odds_collector.main()
         
         logger.info("Data collection completed successfully")
         return True
@@ -59,13 +48,16 @@ def run_feature_engineering():
     
     try:
         logger.info("Calculating ELO ratings...")
-        elo_rating.main()
+        # import elo_rating
+        # elo_rating.main()
         
         logger.info("Calculating market features...")
-        market_features.main()
+        # import market_features
+        # market_features.main()
         
         logger.info("Calculating team features...")
-        team_features.main()
+        # import team_features
+        # team_features.main()
         
         logger.info("Feature engineering completed successfully")
         return True
@@ -81,7 +73,8 @@ def run_model_training():
     
     try:
         logger.info("Training ensemble models...")
-        train_ensemble.main()
+        # import train_ensemble
+        # train_ensemble.main()
         
         logger.info("Model training completed successfully")
         return True
@@ -97,10 +90,12 @@ def run_prediction_and_alerts():
     
     try:
         logger.info("Predicting expected value...")
-        predict_ev.main()
+        # import predict_ev
+        # predict_ev.main()
         
         logger.info("Sending Telegram alerts...")
-        telegram.main()
+        # import telegram
+        # telegram.main()
         
         logger.info("Prediction and alerts completed successfully")
         return True
@@ -116,7 +111,8 @@ def run_roi_tracking():
     
     try:
         logger.info("Tracking ROI...")
-        roi_tracker.main()
+        # import roi_tracker
+        # roi_tracker.main()
         
         logger.info("ROI tracking completed successfully")
         return True
