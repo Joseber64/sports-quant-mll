@@ -1,7 +1,12 @@
 import requests
 import pandas as pd
+import os
 from datetime import datetime
-from config import ODDS_API_KEY
+
+ODDS_API_KEY = os.getenv("ODDS_API_KEY")
+
+if not ODDS_API_KEY:
+    raise ValueError("ODDS_API_KEY environment variable is not set")
 
 SPORTS = [
     "soccer_epl",
