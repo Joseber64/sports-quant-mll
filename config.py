@@ -1,136 +1,204 @@
 """
-Configuration module for sports betting quantitative system.
-Validates environment variables and provides default values.
+Collect and store historical match results in SQLite database.
+Handles duplicates and calculates proper match results including draws.
 """
+import sys
 import os
-import logging
 from pathlib import Path
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Add project root to Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
+import pandas as pd
+import sqlite3
+import logging
+from typing import List, Dict
+import config
+from utils import safe_api_request
+
 logger = logging.getLogger(__name__)
 
-# Project paths
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-RAW_DATA_DIR = DATA_DIR / "raw"
-PROCESSED_DATA_DIR = DATA_DIR / "processed"
-MODELS_DIR = DATA_DIR / "models"
-DATABASE_DIR = BASE_DIR / "database"
+LEAGUES = {
+    "eng.1": "EPL",
+    "esp.1": "LALIGA",
+    "ita.1": "SERIEA",
+    "ger.1": "BUNDESLIGA"
+}
 
-# Create directories if they don't exist
-for directory in [RAW_DATA_DIR, PROCESSED_DATA_DIR, MODELS_DIR, DATABASE_DIR]:
-    directory.mkdir(parents=True, exist_ok=True)
-
-# API Configuration with validation
-def get_env_variable(var_name: str, default: str = None, required: bool = True) -> str:
+def calculate_match_result(home_score: int, away_score: int) -> int:
     """
-    Safely retrieve environment variable with validation.
+    Calculate match result from home team perspective.
     
     Args:
-        var_name: Name of environment variable
-        default: Default value if not found
-        required: Whether variable is required
+        home_score: Home team score
+        away_score: Away team score
         
     Returns:
-        str: Environment variable value
-        
-    Raises:
-        ValueError: If required variable is missing
+        int: 1 for home win, 0.5 for draw, 0 for away win
     """
-    value = os.getenv(var_name, default)
+    if home_score > away_score:
+        return 1
+    elif home_score == away_score:
+        return 0.5  # Draw
+    else:
+        return 0
+
+def fetch_historical_results() -> List[Dict]:
+    """
+    Fetch historical match results from all leagues.
     
-    if required and not value:
-        error_msg = f"Environment variable '{var_name}' is not set"
-        logger.error(error_msg)
-        raise ValueError(error_msg)
+    Returns:
+        List of match result records
+    """
+    all_rows = []
     
-    if value:
-        logger.info(f"Loaded {var_name} successfully")
-    elif default:
-        logger.warning(f"Using default value for {var_name}")
+    for code, league in LEAGUES.items():
+        url = f"{config.ESPN_API_BASE_URL}/{code}/scoreboard"
+        
+        logger.info(f"Fetching results for {league}...")
+        data = safe_api_request(url, timeout=config.REQUEST_TIMEOUT)
+        
+        if not data or "events" not in data:
+            logger.warning(f"No events found for {league}")
+            continue
+        
+        for event in data["events"]:
+            try:
+                competitions = event.get("competitions", [])
+                if not competitions:
+                    continue
+                
+                comp = competitions[0]
+                competitors = comp.get("competitors", [])
+                
+                if len(competitors) < 2:
+                    continue
+                
+                home = competitors[0]
+                away = competitors[1]
+                
+                status = comp.get("status", {}).get("type", {}).get("completed", False)
+                
+                # Only include completed matches
+                if not status:
+                    continue
+                
+                home_score = int(home.get("score", 0))
+                away_score = int(away.get("score", 0))
+                
+                result = calculate_match_result(home_score, away_score)
+                
+                all_rows.append({
+                    "league": league,
+                    "home_team": home.get("team", {}).get("displayName"),
+                    "away_team": away.get("team", {}).get("displayName"),
+                    "home_score": home_score,
+                    "away_score": away_score,
+                    "result": result,
+                    "date": event.get("date"),
+                    "event_id": event.get("id")
+                })
+            
+            except Exception as e:
+                logger.error(f"Error processing event: {str(e)}")
+                continue
+        
+        logger.info(f"Collected {len([r for r in all_rows if r['league'] == league])} results for {league}")
     
-    return value
+    return all_rows
 
-# API Keys (ESPN no requiere API key)
-try:
-    ODDS_API_KEY = get_env_variable("ODDS_API_KEY", required=True)
-    TELEGRAM_TOKEN = get_env_variable("TELEGRAM_TOKEN", required=True)
-    TELEGRAM_CHAT_ID = get_env_variable("TELEGRAM_CHAT_ID", required=True)
-except ValueError as e:
-    logger.error(f"Configuration error: {str(e)}")
-    raise
+def store_results_in_database(results: List[Dict]) -> bool:
+    """
+    Store match results in SQLite database, avoiding duplicates.
+    
+    Args:
+        results: List of match result dictionaries
+        
+    Returns:
+        bool: True if successful
+    """
+    try:
+        df = pd.DataFrame(results)
+        
+        if df.empty:
+            logger.warning("No results to store")
+            return False
+        
+        conn = sqlite3.connect(config.DATABASE_FILE)
+        
+        # Create table with unique constraint if it doesn't exist
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS historical_results (
+                league TEXT,
+                home_team TEXT,
+                away_team TEXT,
+                home_score INTEGER,
+                away_score INTEGER,
+                result REAL,
+                date TEXT,
+                event_id TEXT UNIQUE,
+                PRIMARY KEY (event_id)
+            )
+        """)
+        
+        # Create index for faster queries
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_teams 
+            ON historical_results(home_team, away_team)
+        """)
+        
+        # Get existing event IDs to avoid duplicates
+        existing_ids = pd.read_sql(
+            "SELECT event_id FROM historical_results",
+            conn
+        )["event_id"].tolist()
+        
+        # Filter out duplicates
+        df_new = df[~df["event_id"].isin(existing_ids)]
+        
+        if df_new.empty:
+            logger.info("No new results to add (all duplicates)")
+            conn.close()
+            return True
+        
+        # Insert new results
+        df_new.to_sql(
+            "historical_results",
+            conn,
+            if_exists="append",
+            index=False
+        )
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Stored {len(df_new)} new results in database")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Database operation failed: {str(e)}")
+        return False
 
-# API Configuration - Odds API
-ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4/sports"
-TELEGRAM_API_BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+def main():
+    """Main execution function."""
+    try:
+        logger.info("Starting historical results collection...")
+        
+        results = fetch_historical_results()
+        
+        if not results:
+            logger.error("No results collected")
+            return
+        
+        success = store_results_in_database(results)
+        
+        if success:
+            logger.info("Historical results stored successfully")
+            logger.info(f"Sample: {pd.DataFrame(results).head()}")
+        
+    except Exception as e:
+        logger.error(f"Historical results collection failed: {str(e)}")
+        raise
 
-# ESPN API Configuration (FREE - No API key required)
-ESPN_API_BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer"
-ESPN_LEAGUES = {
-    "premier_league": "eng.1",      # England Premier League
-    "la_liga": "esp.1",            # Spain La Liga
-    "serie_a": "ita.1",            # Italy Serie A
-    "ligue_1": "fra.1",            # France Ligue 1
-    "bundesliga": "ger.1",         # Germany Bundesliga
-    "eredivisie": "ned.1",         # Netherlands Eredivisie
-    "liga_portugal": "por.1",      # Portugal Liga Portugal
-    "scottish_premiership": "sco.1", # Scotland
-    "turkish_super_lig": "tur.1",  # Turkey
-    "greek_super_league": "gre.1", # Greece
-}
-
-ESPN_SEASONS = {
-    "current": 2025,
-    "historical_years": [2024, 2023, 2022, 2021, 2020, 2019]  # Last 6 seasons for training
-}
-
-# Rate limiting
-MAX_RETRIES = 3
-RETRY_DELAY = 2  # seconds
-REQUEST_TIMEOUT = 30  # seconds
-ESPN_RATE_LIMIT = 0.5  # requests per second
-
-# Model configuration
-RANDOM_SEED = 42
-TEST_SIZE = 0.2
-VALIDATION_SIZE = 0.1
-
-# ELO Configuration
-ELO_K_FACTOR = 30
-ELO_INITIAL_RATING = 1500
-
-# Kelly Criterion Configuration
-MAX_KELLY_FRACTION = 0.25  # Maximum 25% of bankroll
-MIN_KELLY_STAKE = 0.01  # Minimum 1% stake
-
-# Betting Thresholds
-MIN_EXPECTED_VALUE = 0.05  # 5% minimum EV
-MIN_WIN_PROBABILITY = 0.35  # 35% minimum win probability
-MAX_WIN_PROBABILITY = 0.95  # 95% maximum (avoid overconfidence)
-
-# File paths - Raw data
-ODDS_FILE = RAW_DATA_DIR / "odds.csv"
-ESPN_HISTORICAL_FILE = RAW_DATA_DIR / "espn_historical.csv"
-ESPN_LIVE_FILE = RAW_DATA_DIR / "espn_live.csv"
-ESPN_FIXTURES_FILE = RAW_DATA_DIR / "espn_fixtures.csv"
-
-# File paths - Processed data
-FEATURES_FILE = PROCESSED_DATA_DIR / "features.csv"
-MARKET_FEATURES_FILE = PROCESSED_DATA_DIR / "market_features.csv"
-HISTORICAL_FEATURES_FILE = PROCESSED_DATA_DIR / "historical_features.csv"
-COMBINED_FEATURES_FILE = PROCESSED_DATA_DIR / "combined_features.csv"
-FINAL_BETS_FILE = PROCESSED_DATA_DIR / "final_bets.csv"
-DATABASE_FILE = DATABASE_DIR / "sports.db"
-
-# Model files
-LGBM_MODEL_FILE = MODELS_DIR / "lgbm.pkl"
-XGB_MODEL_FILE = MODELS_DIR / "xgb.pkl"
-RF_MODEL_FILE = MODELS_DIR / "rf.pkl"
-ENSEMBLE_MODEL_FILE = MODELS_DIR / "ensemble.pkl"
-METRICS_FILE = MODELS_DIR / "metrics.json"
-
-logger.info("Configuration loaded successfully - ESPN integration active (Free API)")
+if __name__ == "__main__":
+    main()
