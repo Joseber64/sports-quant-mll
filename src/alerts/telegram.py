@@ -1,10 +1,9 @@
+import os
 import pandas as pd
 import requests
 
-from config import (
-    TELEGRAM_TOKEN,
-    TELEGRAM_CHAT_ID
-)
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 df = pd.read_csv(
     "data/processed/final_bets.csv"
