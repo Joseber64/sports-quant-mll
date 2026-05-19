@@ -6,6 +6,12 @@ import pandas as pd
 import logging
 from datetime import datetime
 from typing import List, Dict
+import sys
+from pathlib import Path
+
+# Add parent directory to path to find config and utils
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 import config
 from utils import safe_api_request, save_csv_safe
 
