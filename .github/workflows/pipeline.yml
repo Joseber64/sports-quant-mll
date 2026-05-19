@@ -1,64 +1,76 @@
 name: Quant Sports AI
 
 on:
-
   schedule:
+    # Ejecutar cada 15 minutos
     - cron: "*/15 * * * *"
-
+  
+  # Permitir ejecutar manualmente desde GitHub
   workflow_dispatch:
 
 jobs:
-
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-
+      # 1. Descargar el código
       - uses: actions/checkout@v4
 
+      # 2. Configurar Python 3.11
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # 3. Instalar dependencias
       - run: pip install -r requirements.txt
 
+      # 4. Crear directorios necesarios
       - run: |
           mkdir -p database
           mkdir -p data/raw
           mkdir -p data/processed
           mkdir -p data/models
 
+      # 5. Recolectar datos de cuotas
       - name: Collect Odds
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python src/collectors/odds_collector.py
 
+      # 6. Recolectar resultados históricos
       - name: Collect Historical
         run: |
           python src/collectors/historical_results.py
 
+      # 7. Calcular ratings ELO
       - name: ELO Ratings
         run: |
           python src/features/elo_rating.py
 
+      # 8. Calcular características de mercado
       - name: Market Features
         run: |
           python src/features/market_features.py
 
+      # 9. Entrenar modelo ensemble
       - name: Train Ensemble
         run: |
           python src/models/train_ensemble.py
 
-      - name: Predict EV+
+      # 10. Predecir valor esperado
+      - name: Predict EV
         run: |
           python src/models/predict_ev.py
 
+      # 11. Rastrear ROI
       - name: ROI Tracking
         run: |
           python src/tracking/roi_tracker.py
 
+      # 12. Enviar alertas a Telegram
       - name: Telegram Alerts
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
