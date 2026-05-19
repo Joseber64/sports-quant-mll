@@ -50,25 +50,53 @@ def get_env_variable(var_name: str, default: str = None, required: bool = True) 
     
     if value:
         logger.info(f"Loaded {var_name} successfully")
-    else:
+    elif default:
         logger.warning(f"Using default value for {var_name}")
     
     return value
 
 # API Keys
-ODDS_API_KEY = get_env_variable("ODDS_API_KEY", required=True)
-TELEGRAM_TOKEN = get_env_variable("TELEGRAM_TOKEN", required=True)
-TELEGRAM_CHAT_ID = get_env_variable("TELEGRAM_CHAT_ID", required=True)
+try:
+    ODDS_API_KEY = get_env_variable("ODDS_API_KEY", required=True)
+    TELEGRAM_TOKEN = get_env_variable("TELEGRAM_TOKEN", required=True)
+    TELEGRAM_CHAT_ID = get_env_variable("TELEGRAM_CHAT_ID", required=True)
+    API_FOOTBALL_KEY = get_env_variable("API_FOOTBALL_KEY", required=True)
+except ValueError as e:
+    logger.error(f"Configuration error: {str(e)}")
+    raise
 
-# API Configuration
+# API Configuration - Odds API
 ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4/sports"
 ESPN_API_BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer"
 TELEGRAM_API_BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+
+# API Configuration - API-Football (for historical data)
+API_FOOTBALL_BASE_URL = "https://v3.football.api-sports.io"
+API_FOOTBALL_HEADERS = {
+    "x-apisports-key": API_FOOTBALL_KEY
+}
+
+# API-Football Configuration for Historical Data
+API_FOOTBALL_LEAGUES = {
+    "premier_league": 39,      # England
+    "la_liga": 140,            # Spain
+    "serie_a": 135,            # Italy
+    "ligue_1": 61,             # France
+    "bundesliga": 78,          # Germany
+    "eredivisie": 88,          # Netherlands
+    "liga_portugal": 94,       # Portugal
+}
+
+API_FOOTBALL_SEASONS = {
+    "current": 2025,
+    "historical_years": [2024, 2023, 2022, 2021, 2020]  # Last 5 seasons for training
+}
 
 # Rate limiting
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 REQUEST_TIMEOUT = 30  # seconds
+API_FOOTBALL_RATE_LIMIT = 10  # requests per minute
 
 # Model configuration
 RANDOM_SEED = 42
@@ -88,11 +116,16 @@ MIN_EXPECTED_VALUE = 0.05  # 5% minimum EV
 MIN_WIN_PROBABILITY = 0.35  # 35% minimum win probability
 MAX_WIN_PROBABILITY = 0.95  # 95% maximum (avoid overconfidence)
 
-# File paths
+# File paths - Raw data
 ODDS_FILE = RAW_DATA_DIR / "odds.csv"
 ESPN_FILE = RAW_DATA_DIR / "espn.csv"
+API_FOOTBALL_FILE = RAW_DATA_DIR / "api_football_historical.csv"
+API_FOOTBALL_FIXTURES_FILE = RAW_DATA_DIR / "api_football_fixtures.csv"
+
+# File paths - Processed data
 FEATURES_FILE = PROCESSED_DATA_DIR / "features.csv"
 MARKET_FEATURES_FILE = PROCESSED_DATA_DIR / "market_features.csv"
+HISTORICAL_FEATURES_FILE = PROCESSED_DATA_DIR / "historical_features.csv"
 FINAL_BETS_FILE = PROCESSED_DATA_DIR / "final_bets.csv"
 DATABASE_FILE = DATABASE_DIR / "sports.db"
 
@@ -102,4 +135,4 @@ XGB_MODEL_FILE = MODELS_DIR / "xgb.pkl"
 RF_MODEL_FILE = MODELS_DIR / "rf.pkl"
 METRICS_FILE = MODELS_DIR / "metrics.json"
 
-logger.info("Configuration loaded successfully")
+logger.info("Configuration loaded successfully with API-Football integration")
