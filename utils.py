@@ -116,19 +116,17 @@ def safe_api_request(
         logger.error(f"API request failed: {url} - {str(e)}")
         raise
 
-def fetch_api_football_data(
+def fetch_espn_data(
     endpoint: str,
     params: dict = None,
-    headers: dict = None,
-    rate_limit_delay: float = 0.1
+    rate_limit_delay: float = 0.5
 ) -> Optional[dict]:
     """
-    Fetch data from API-Football with rate limiting.
+    Fetch data from ESPN API with rate limiting (FREE API - no key needed).
     
     Args:
-        endpoint: API endpoint (e.g., '/fixtures', '/standings')
+        endpoint: API endpoint (e.g., '/scoreboard', '/standings')
         params: Query parameters
-        headers: Request headers including API key
         rate_limit_delay: Delay between requests in seconds
         
     Returns:
@@ -136,22 +134,22 @@ def fetch_api_football_data(
     """
     import config
     
-    url = f"{config.API_FOOTBALL_BASE_URL}{endpoint}"
+    url = f"{config.ESPN_API_BASE_URL}{endpoint}"
     
-    # Add rate limiting
+    # Add rate limiting to respect ESPN's terms
     time.sleep(rate_limit_delay)
     
-    return safe_api_request(url, params=params, headers=headers)
+    return safe_api_request(url, params=params)
 
-def extract_api_football_matches(
+def extract_espn_matches(
     response_data: dict,
     include_stats: bool = True
 ) -> List[Dict[str, Any]]:
     """
-    Extract and flatten match data from API-Football response.
+    Extract and flatten match data from ESPN response.
     
     Args:
-        response_data: Raw API response
+        response_data: Raw ESPN API response
         include_stats: Whether to include detailed statistics
         
     Returns:
@@ -160,42 +158,35 @@ def extract_api_football_matches(
     matches = []
     
     try:
-        if not response_data or "response" not in response_data:
-            logger.warning("No response data in API-Football response")
-            return matches
+        # Handle ESPN events/scoreboard response
+        events = response_data.get("events", [])
         
-        for fixture in response_data.get("response", []):
+        for event in events:
             try:
+                # Extract basic match info
                 match_data = {
-                    "fixture_id": fixture.get("fixture", {}).get("id"),
-                    "date": fixture.get("fixture", {}).get("date"),
-                    "status": fixture.get("fixture", {}).get("status", {}).get("short"),
-                    "home_team": fixture.get("teams", {}).get("home", {}).get("name"),
-                    "away_team": fixture.get("teams", {}).get("away", {}).get("name"),
-                    "home_team_id": fixture.get("teams", {}).get("home", {}).get("id"),
-                    "away_team_id": fixture.get("teams", {}).get("away", {}).get("id"),
-                    "home_goals": fixture.get("goals", {}).get("home"),
-                    "away_goals": fixture.get("goals", {}).get("away"),
-                    "league": fixture.get("league", {}).get("name"),
-                    "league_id": fixture.get("league", {}).get("id"),
-                    "season": fixture.get("league", {}).get("season"),
+                    "event_id": event.get("id"),
+                    "date": event.get("date"),
+                    "status": event.get("status"),
+                    "home_team": event.get("competitions", [{}])[0].get("competitors", [{}])[0].get("team", {}).get("displayName"),
+                    "away_team": event.get("competitions", [{}])[0].get("competitors", [{}])[1].get("team", {}).get("displayName") if len(event.get("competitions", [{}])[0].get("competitors", [])) > 1 else None,
+                    "home_team_id": event.get("competitions", [{}])[0].get("competitors", [{}])[0].get("team", {}).get("id"),
+                    "away_team_id": event.get("competitions", [{}])[0].get("competitors", [{}])[1].get("team", {}).get("id") if len(event.get("competitions", [{}])[0].get("competitors", [])) > 1 else None,
+                    "home_goals": int(event.get("competitions", [{}])[0].get("competitors", [{}])[0].get("score", 0)),
+                    "away_goals": int(event.get("competitions", [{}])[0].get("competitors", [{}])[1].get("score", 0)) if len(event.get("competitions", [{}])[0].get("competitors", [])) > 1 else 0,
+                    "league": event.get("league", {}).get("name"),
+                    "league_id": event.get("league", {}).get("id"),
                 }
                 
-                if include_stats and "statistics" in fixture:
-                    stats = fixture.get("statistics", [])
-                    if len(stats) >= 2:
-                        home_stats, away_stats = stats[0], stats[1]
-                        
-                        match_data.update({
-                            "home_shots": home_stats.get("statistics", [{}])[0].get("value", 0),
-                            "away_shots": away_stats.get("statistics", [{}])[0].get("value", 0),
-                            "home_shots_on_target": home_stats.get("statistics", [{}])[1].get("value", 0),
-                            "away_shots_on_target": away_stats.get("statistics", [{}])[1].get("value", 0),
-                            "home_possession": home_stats.get("statistics", [{}])[8].get("value", 0),
-                            "away_possession": away_stats.get("statistics", [{}])[8].get("value", 0),
-                            "home_passes": home_stats.get("statistics", [{}])[2].get("value", 0),
-                            "away_passes": away_stats.get("statistics", [{}])[2].get("value", 0),
-                        })
+                if include_stats and "competitions" in event:
+                    competition = event.get("competitions", [{}])[0]
+                    articles = event.get("articles", [])
+                    
+                    match_data.update({
+                        "attendance": competition.get("attendance"),
+                        "venue": competition.get("venue", {}).get("fullName"),
+                        "articles_count": len(articles),
+                    })
                 
                 matches.append(match_data)
                 
@@ -203,11 +194,11 @@ def extract_api_football_matches(
                 logger.warning(f"Error extracting match data: {str(e)}")
                 continue
         
-        logger.info(f"Extracted {len(matches)} matches from API-Football")
+        logger.info(f"Extracted {len(matches)} matches from ESPN")
         return matches
         
     except Exception as e:
-        logger.error(f"Error processing API-Football response: {str(e)}")
+        logger.error(f"Error processing ESPN response: {str(e)}")
         return matches
 
 def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> float:
